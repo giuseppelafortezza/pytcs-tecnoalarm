@@ -56,18 +56,22 @@ binary_sensor:
     - name: "Program Total"
       unique_id: program_total                                        
       state_topic: "tecnoalarm/programs/program_total"          
-      command_topic: "tecnoalarm/programs/program_total/set"       
+      command_topic: "tecnoalarm/programs/program_total/set"
+      availability_topic: "tecnoalarm/zones/program_total"   
       value_template: "{{ value_json.status }}"          
-      command_template: '{ "command": "{{ value }}" }'       
+      command_template: '{ "command": "{{ value }}" }'
+      availability_template: "{{ value_json.available }}"
       optimistic: false                                  
       qos: 0                                               
       retain: false                                      
     - name: "Program Garage"
       unique_id: program_garage                                    
       state_topic: "tecnoalarm/programs/program_garage"          
-      command_topic: "tecnoalarm/programs/program_garage/set"       
+      command_topic: "tecnoalarm/programs/program_garage/set"
+      availability_topic: "tecnoalarm/zones/program_garage"   
       value_template: "{{ value_json.status }}"          
-      command_template: '{ "command": "{{ value }}" }'       
+      command_template: '{ "command": "{{ value }}" }'     
+      availability_template: "{{ value_json.available }}"  
       optimistic: false                                  
       qos: 0                                               
       retain: false  

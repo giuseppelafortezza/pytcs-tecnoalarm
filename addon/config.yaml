@@ -1,6 +1,6 @@
 name: "TCS Tecnoalarm"
 description: "Tecnoalarm TCS integration"
-version: "1.0.0"
+version: "1.0.1"
 slug: "tcs_tecnoalarm"
 init: false
 arch:
@@ -20,6 +20,8 @@ options:
   tcs_serial: "123456789"
   tcs_username: "username"
   tcs_password: "password"
+  tcs_can_arm: "true"
+  tcs_can_disarm: "false"
 schema:
   mqtt_host: str
   mqtt_port: int         
@@ -27,4 +29,6 @@ schema:
   mqtt_password: str  
   tcs_serial: str    
   tcs_username: str  
-  tcs_password: str 
+  tcs_password: str
+  tcs_can_arm: bool
+  tcs_can_disarm: bool

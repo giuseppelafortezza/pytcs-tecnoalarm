@@ -23,4 +23,9 @@ configuration:
   tcs_token:
     name: TCS token
     description: The Tecnoalarm TCS token.
-  
+  tcs_can_arm:
+    name: TCS Enable ARM
+    description: The Home Assistant addon can arm.
+  tcs_can_disarm:
+    name: TCS Enable DISARM
+    description: The Home Assistant addon can disarm.

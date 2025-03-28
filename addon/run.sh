@@ -10,6 +10,8 @@ export TCS_USERNAME="$(bashio::config 'tcs_username')"
 export TCS_PASSWORD="$(bashio::config 'tcs_password')"
 export TCS_SERIAL="$(bashio::config 'tcs_serial')"
 export TCS_TOKEN="$(bashio::config 'tcs_token')"
+export TCS_CAN_ARM="$(bashio::config 'tcs_can_arm')"
+export TCS_CAN_DISARM="$(bashio::config 'tcs_can_disarm')"
 
 touch /data/tcsSession.json
 

@@ -23,6 +23,8 @@ mqtt_retain = os.getenv("MQTT_RETAIN", "True").lower() == "true"
 tcs_username = os.getenv("TCS_USERNAME")
 tcs_password = os.getenv("TCS_PASSWORD")
 tcs_serial = os.getenv("TCS_SERIAL")
+tcs_can_arm = os.getenv("TCS_CAN_ARM", True).lower() == "true"
+tcs_can_disarm = os.getenv("TCS_CAN_DISARM", False).lower() == "false"
 
 secret_file = '/data/tcsSession.json'
 refresh_period = 2
@@ -73,9 +75,15 @@ def on_message(client, userdata, msg):
 		for progId, progData in programs.items():
 			if progData['name'] == target:
 				if request['command'] == 'LOCK' and progData['status'] != 3:
-					session.enable_program(progId)
+					if tcs_can_arm:
+						session.enable_program(progId)
+					else:
+						logger.warning('Can not arm')
 				elif request['command'] == 'UNLOCK' and progData['status'] != 0:
-					session.disable_program(progId)
+					if tcs_can_disarm:
+						session.disable_program(progId)
+					else:
+						logger.warning('Can not disarm')
 	except AttributeError:
 		logger.warning('Should work!!')
 	except ValueError:
@@ -116,7 +124,8 @@ def init_tecnoalarm(max_retry):
 		f.close()
 	except Exception as e:
 		logging.error(traceback.format_exc())
-		
+	
+	initOk = False
 	while retry < max_retry:
 		try:
 			logger.info('Try to connect to server (' + str(retry+1) + '/'+str(max_retry) + ')')
@@ -136,13 +145,22 @@ def init_tecnoalarm(max_retry):
 			session.select_centrale(centrale.tp)
 			retry = max_retry
 			logger.info('Connection established')
+			initOk = True
 		except AssertionError:
-			logger.warning('Connection error. Wait 5 seconds and retry')
+			logger.warning('Connection error. Wait 10 seconds and retry')
 			retry = retry+1
-			time.sleep(5)
-	logger.info('Init tecnoalarm API...DONE')
+			time.sleep(11)
+		except Exception as e:
+			logging.error(traceback.format_exc())
+
+	if initOk:
+		logger.info('Init tecnoalarm API...DONE')
+	else:
+		logger.error('Init tecnoalarm API...FAILED')
+	return initOk
 
 def init_mqtt():
+	global mqttClient
 	logger.info('Start creating MQTT client...')
 	mqttClient = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 	mqttClient.on_connect = on_connect
@@ -152,39 +170,57 @@ def init_mqtt():
 	mqttClient.username_pw_set(mqtt_username, mqtt_password)
 	mqttClient.connect(mqtt_host, mqtt_port, 60)
 	logger.info('Start creating MQTT client...DONE') 
-	return mqttClient
 
 def refresh_zones():
 	logger.debug('Refresh zones')
-	new_zones = []
-	z = session.get_zones()
-	for zone in z.root:
-		if zone.status == ZoneStatusEnum.UNKNOWN or not zone.allocated:
-			continue
-		if zones[zone.idx]['status'] != zone.status:	
-			new_zones.append(zone.idx)
-		zones[zone.idx]['status'] = zone.status
-		zones[zone.idx]['available'] = 'online' if zone.status != ZoneStatusEnum.ISOLATED else 'offline'
-	if new_zones:
-		updateZoneThread = threading.Thread(target=update_zones, args=(new_zones,))
-		updateZoneThread.daemon = True
-		updateZoneThread.start()
+	try:
+		z = session.get_zones()
+		if z:
+			new_zones = []
+			for zone in z.root:
+				if zone.status == ZoneStatusEnum.UNKNOWN or not zone.allocated:
+					continue
+				if zones[zone.idx]['status'] != zone.status:	
+					new_zones.append(zone.idx)
+				zones[zone.idx]['status'] = zone.status
+				zones[zone.idx]['available'] = 'online' if zone.status != ZoneStatusEnum.ISOLATED else 'offline'
+			if new_zones:
+				updateZoneThread = threading.Thread(target=update_zones, args=(new_zones,))
+				updateZoneThread.daemon = True
+				updateZoneThread.start()
+	except Exception as e:
+		logging.error(traceback.format_exc())
+		logger.warning('Failed to get zones (Generic error):' + str(e))
+
 	threading.Timer(refresh_period, refresh_zones).start() 
 
 def refresh_programs():
 	logger.debug('Refresh programs')
-	new_programs = []
-	p = session.get_programs()
-	for programstatus, programdata in zip(p.root, centrale.tp.status.programs):
-		if len(programdata.zones) == 0:
-			continue
-		if programs[programdata.idx]['status'] != int_to_enum(programstatus.status):	
-			new_programs.append(programdata.idx)
-		programs[programdata.idx]['status'] = int_to_enum(programstatus.status)
-	if new_programs:
-		updateProgramThread = threading.Thread(target=update_programs, args=(new_programs,))
-		updateProgramThread.daemon = True
-		updateProgramThread.start()
+	try:
+		p = session.get_programs()
+		if p:
+			new_programs = []
+			for programstatus, programdata in zip(p.root, centrale.tp.status.programs):
+				if len(programdata.zones) == 0:
+					continue
+				if programs[programdata.idx]['status'] != int_to_enum(programstatus.status):	
+					new_programs.append(programdata.idx)
+				programs[programdata.idx]['status'] = int_to_enum(programstatus.status)
+				if programs[programdata.idx]['status'] == ProgramStatusEnum.LOCKING || programs[programdata.idx]['status'] == ProgramStatusEnum.LOCKED:
+					programs[programdata.idx]['available'] = tcs_can_disarm
+				elif programs[programdata.idx]['status'] == ProgramStatusEnum.UNLOCKING || programs[programdata.idx]['status'] == ProgramStatusEnum.UNLOCKED:
+					programs[programdata.idx]['available'] = tcs_can_arm
+				else:
+					programs[programdata.idx]['available'] = False
+			if new_programs:
+				updateProgramThread = threading.Thread(target=update_programs, args=(new_programs,))
+				updateProgramThread.daemon = True
+				updateProgramThread.start()
+	except Exception as e:
+		logging.error(traceback.format_exc())
+		logger.warning('Failed to get programs (Generic error):' + str(e))
+	
+	
 	threading.Timer(refresh_period, refresh_programs).start() 
 	
 def update_zones(data):
@@ -194,6 +230,10 @@ def update_zones(data):
 		message = json.dumps(zones[z])
 		logger.debug(message)
 		res = mqttClient.publish(topic, message, mqtt_qos, mqtt_retain)
+		if res:
+			logger.debug("Update zones sent")
+		else:
+			logger.warning("Failed to sent update zones")
 
 def update_programs(data):
 	logger.info('Update programs: ' + str(data))
@@ -202,6 +242,10 @@ def update_programs(data):
 		message = json.dumps(programs[p])
 		logger.debug(message)
 		res = mqttClient.publish(topic, message, mqtt_qos, mqtt_retain)
+		if res:
+			logger.debug("Update programs sent")
+		else:
+			logger.warning("Failed to sent update programs")
 
 def init_zones():
 	logger.info('Init zones')
@@ -224,6 +268,7 @@ def init_programs():
 		programs[programdata.idx]['name'] =  clean_name(programdata.description)
 		programs[programdata.idx]['zones'] = programdata.zones
 		programs[programdata.idx]['status'] =  None
+		programs[programdata.idx]['available'] = False
 
 logger = logging.getLogger("")
 logging.basicConfig(
@@ -236,14 +281,24 @@ logging.basicConfig(
 )
 
 if __name__ == "__main__":
-	init_tecnoalarm(10)
-	init_zones()
-	init_programs()
-	mqttClient = init_mqtt()
+	while True:
+		if init_tecnoalarm(10):
+			init_zones()
+			init_programs()
+			init_mqtt()
 
-	threading.Timer(refresh_period, refresh_zones).start() 
-	threading.Timer(refresh_period, refresh_programs).start() 
+			threading.Timer(refresh_period, refresh_zones).start() 
+			threading.Timer(refresh_period, refresh_programs).start() 
 
-	logger.info('Start main loop addon...')
+			logger.info('Start main loop addon...')
 
-	mqttClient.loop_forever()
+			mqttClient.loop_forever()
+		else:
+			logger.error('Failed to start tecnoalarm. Delete secrets...')
+			try:
+				os.remove(secret_file)
+				logger.error('Failed to start tecnoalarm. Delete secrets...DONE')
+			except OSError as e:
+				logger.warning('Failed to delete secret file (' + e.filename + '). Error:' + e.strerror)
+	
+		time.sleep(10)
