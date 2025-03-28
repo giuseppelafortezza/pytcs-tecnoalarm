@@ -143,37 +143,28 @@ class TCSSession(Session):
             print(r.json())
         return r.ok
 
-    @retry(AssertionError, tries=10, delay=10)
     def get_programs(self):
         r = self.get("/tcs/program")
-        assert r.ok
-
         return TcsProgram.model_validate_json(r.text)
 
-    @retry(AssertionError, tries=10, delay=10)
     def get_zones(self):
         r = self.get("/tcs/zone")
-        assert r.ok
-
         return TcsZones.model_validate_json(r.text)
 
-    @retry(AssertionError, tries=10, delay=10)
     def get_remotes(self) -> list[bool]:
         r = self.get("/tcs/remote")
-        assert r.ok
-
         return r.json()
 
-    @retry(AssertionError, tries=10, delay=10)
     def get_logs(self):
         r = self.get("/tcs/log/0")
-        assert r.ok
-
         return TcsLogs.model_validate_json(r.text)
 
+    @retry(tries=10, delay=10)
     def request(self, method, url, *args, **kwargs):
         url = self.base_url + url
-        return super().request(method, url, *args, **kwargs)
+        r = super().request(method, url, *args, **kwargs)
+        r.raise_for_status()
+        return r
 
     def enable_program(self, prg_id: int) -> None:
         r = self.put(f"/tcs/program/{prg_id}/on", json=[])
