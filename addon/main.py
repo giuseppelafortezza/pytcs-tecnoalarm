@@ -24,7 +24,7 @@ tcs_username = os.getenv("TCS_USERNAME")
 tcs_password = os.getenv("TCS_PASSWORD")
 tcs_serial = os.getenv("TCS_SERIAL")
 tcs_can_arm = os.getenv("TCS_CAN_ARM", True).lower() == "true"
-tcs_can_disarm = os.getenv("TCS_CAN_DISARM", False).lower() == "false"
+tcs_can_disarm = os.getenv("TCS_CAN_DISARM", True).lower() == "true"
 
 secret_file = '/data/tcsSession.json'
 refresh_period = 2
@@ -206,9 +206,9 @@ def refresh_programs():
 				if programs[programdata.idx]['status'] != int_to_enum(programstatus.status):	
 					new_programs.append(programdata.idx)
 				programs[programdata.idx]['status'] = int_to_enum(programstatus.status)
-				if programs[programdata.idx]['status'] == ProgramStatusEnum.LOCKING || programs[programdata.idx]['status'] == ProgramStatusEnum.LOCKED:
+				if programs[programdata.idx]['status'] == ProgramStatusEnum.LOCKING or programs[programdata.idx]['status'] == ProgramStatusEnum.LOCKED:
 					programs[programdata.idx]['available'] = tcs_can_disarm
-				elif programs[programdata.idx]['status'] == ProgramStatusEnum.UNLOCKING || programs[programdata.idx]['status'] == ProgramStatusEnum.UNLOCKED:
+				elif programs[programdata.idx]['status'] == ProgramStatusEnum.UNLOCKING or programs[programdata.idx]['status'] == ProgramStatusEnum.UNLOCKED:
 					programs[programdata.idx]['available'] = tcs_can_arm
 				else:
 					programs[programdata.idx]['available'] = False
