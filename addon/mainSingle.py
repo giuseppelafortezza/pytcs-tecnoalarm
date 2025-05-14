@@ -2,7 +2,6 @@ import time
 import os
 import json
 import sys
-import traceback
 import logging
 import paho.mqtt.client as mqtt
 
@@ -25,9 +24,8 @@ tcs_serial = os.getenv("TCS_SERIAL")
 tcs_can_arm = os.getenv("TCS_CAN_ARM", True).lower() == "true"
 tcs_can_disarm = os.getenv("TCS_CAN_DISARM", True).lower() == "true"
 
-# secret_file = '/data/tcsSession.json'
-secret_file = 'tcsSession.json'
-refresh_period = 2
+secret_file = '/data/tcsSession.json'
+refresh_period = 5
 
 mqtt_topic_base = "tecnoalarm"
 mqtt_topic_zone = "zones"
@@ -79,14 +77,14 @@ def on_message(client, userdata, msg):
 					if tcs_can_arm:
 						session.enable_program(progId)
 					else:
-						logger.warning('Can not arm')
+						logger.warning('Can not arm: ' + target)
 				elif request['command'] == 'UNLOCK' and progData['status'] != 0:
 					if tcs_can_disarm:
 						session.disable_program(progId)
 					else:
-						logger.warning('Can not disarm')
+						logger.warning('Can not disarm: ' + target)
 	except AttributeError:
-		logger.warning('Should work!!')
+		logger.warning('Should work for target: ' + target)
 	except ValueError:
 		logger.error('Wrong message received:' + message)
 	except AssertionError:
@@ -123,8 +121,12 @@ def init_tecnoalarm(max_retry):
 		tcs_token = tcs_session['token']
 		tcs_appid = tcs_session['appid']
 		f.close()
+	except FileNotFoundError:
+		logger.error('Secret file not found')
+	except KeyError:
+		logger.error('Secret file: key not found')
 	except Exception as e:
-		logging.error(traceback.format_exc())
+		logger.error('Secret file unknown error')
 	
 	initOk = False
 	while retry < max_retry:
@@ -152,14 +154,12 @@ def init_tecnoalarm(max_retry):
 			retry = retry+1
 			time.sleep(11)
 		except Exception as e:
-			logging.error(traceback.format_exc())
+			logging.error('Generic login error')
 
 	if initOk:
 		logger.info('Init tecnoalarm API...DONE')
 	else:
-		logger.error('Init tecnoalarm API...FAILED')
-	
-	time.sleep(3)
+		logger.error('Init tecnoalarm API...FAILED')	
 	return initOk
 
 def init_mqtt():
@@ -187,7 +187,6 @@ def refresh_zones(new_zones):
 				zones[zone.idx]['status'] = zone.status
 				zones[zone.idx]['available'] = 'online' if zone.status != ZoneStatusEnum.ISOLATED else 'offline'
 	except Exception as e:
-		logging.error(traceback.format_exc())
 		logger.warning('Failed to get zones (Generic error):' + str(e))
 
 def refresh_programs(new_programs):
@@ -208,12 +207,8 @@ def refresh_programs(new_programs):
 				else:
 					programs[programdata.idx]['available'] = False
 	except Exception as e:
-		logging.error(traceback.format_exc())
 		logger.warning('Failed to get programs (Generic error):' + str(e))
-	
-	
-	threading.Timer(refresh_period, refresh_programs).start() 
-	
+		
 def update_zones(data):
 	logger.info('Update zones: ' + str(data))
 	for z in data:

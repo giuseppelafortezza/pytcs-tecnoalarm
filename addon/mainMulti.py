@@ -2,6 +2,7 @@ import time
 import os
 import json
 import sys
+import threading
 import traceback
 import logging
 import paho.mqtt.client as mqtt
@@ -22,11 +23,10 @@ mqtt_retain = os.getenv("MQTT_RETAIN", "True").lower() == "true"
 tcs_username = os.getenv("TCS_USERNAME")
 tcs_password = os.getenv("TCS_PASSWORD")
 tcs_serial = os.getenv("TCS_SERIAL")
-tcs_can_arm = os.getenv("TCS_CAN_ARM", True).lower() == "true"
-tcs_can_disarm = os.getenv("TCS_CAN_DISARM", True).lower() == "true"
+tcs_can_arm = os.getenv("TCS_CAN_ARM", "True").lower() == "true"
+tcs_can_disarm = os.getenv("TCS_CAN_DISARM", "True").lower() == "true"
 
-# secret_file = '/data/tcsSession.json'
-secret_file = 'tcsSession.json'
+secret_file = '/data/tcsSession.json'
 refresh_period = 2
 
 mqtt_topic_base = "tecnoalarm"
@@ -67,7 +67,6 @@ def on_connect(client, userdata, flags, reason_code, properties):
 		logger.info('Subscribing to ' + topic + ': result(' + str(res) + ') id(' + str(mid) + ')')
 	
 def on_message(client, userdata, msg):
-	global session
 	message = msg.payload.decode("utf-8")
 	logger.info('Received on topic[' + msg.topic + ']: ' + message)
 	try:
@@ -158,8 +157,6 @@ def init_tecnoalarm(max_retry):
 		logger.info('Init tecnoalarm API...DONE')
 	else:
 		logger.error('Init tecnoalarm API...FAILED')
-	
-	time.sleep(3)
 	return initOk
 
 def init_mqtt():
@@ -174,11 +171,12 @@ def init_mqtt():
 	mqttClient.connect(mqtt_host, mqtt_port, 60)
 	logger.info('Start creating MQTT client...DONE') 
 
-def refresh_zones(new_zones):
+def refresh_zones():
 	logger.debug('Refresh zones')
 	try:
 		z = session.get_zones()
 		if z:
+			new_zones = []
 			for zone in z.root:
 				if zone.status == ZoneStatusEnum.UNKNOWN or not zone.allocated:
 					continue
@@ -186,15 +184,22 @@ def refresh_zones(new_zones):
 					new_zones.append(zone.idx)
 				zones[zone.idx]['status'] = zone.status
 				zones[zone.idx]['available'] = 'online' if zone.status != ZoneStatusEnum.ISOLATED else 'offline'
+			if new_zones:
+				updateZoneThread = threading.Thread(target=update_zones, args=(new_zones,))
+				updateZoneThread.daemon = True
+				updateZoneThread.start()
 	except Exception as e:
 		logging.error(traceback.format_exc())
 		logger.warning('Failed to get zones (Generic error):' + str(e))
 
-def refresh_programs(new_programs):
+	threading.Timer(refresh_period, refresh_zones).start() 
+
+def refresh_programs():
 	logger.debug('Refresh programs')
 	try:
 		p = session.get_programs()
 		if p:
+			new_programs = []
 			for programstatus, programdata in zip(p.root, centrale.tp.status.programs):
 				if len(programdata.zones) == 0:
 					continue
@@ -207,6 +212,10 @@ def refresh_programs(new_programs):
 					programs[programdata.idx]['available'] = tcs_can_arm
 				else:
 					programs[programdata.idx]['available'] = False
+			if new_programs:
+				updateProgramThread = threading.Thread(target=update_programs, args=(new_programs,))
+				updateProgramThread.daemon = True
+				updateProgramThread.start()
 	except Exception as e:
 		logging.error(traceback.format_exc())
 		logger.warning('Failed to get programs (Generic error):' + str(e))
@@ -271,33 +280,19 @@ logging.basicConfig(
     ]
 )
 
-def main_loop_func():
-	while True:
-		new_zones = []
-		new_programs = []
-		refresh_zones(new_zones)
-		refresh_programs(new_programs)
-
-		if new_zones:
-			update_zones(new_zones)
-		if new_programs:
-			update_programs(new_programs)
-			
-		time.sleep(refresh_period)
-
 if __name__ == "__main__":
 	while True:
 		if init_tecnoalarm(10):
-			init_mqtt()
 			init_zones()
 			init_programs()
+			init_mqtt()
+
+			threading.Timer(refresh_period, refresh_zones).start() 
+			threading.Timer(refresh_period, refresh_programs).start() 
 
 			logger.info('Start main loop addon...')
-			mqttClient.loop_start()
-			main_loop_func()
-			mqttClient.loop_stop()
-			logger.info('Stop main loop addon...')
 
+			mqttClient.loop_forever()
 		else:
 			logger.error('Failed to start tecnoalarm. Delete secrets...')
 			try:

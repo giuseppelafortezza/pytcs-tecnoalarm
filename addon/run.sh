@@ -15,4 +15,4 @@ export TCS_CAN_DISARM="$(bashio::config 'tcs_can_disarm')"
 
 touch /data/tcsSession.json
 
-python3 /main.py
+python3 /mainSingle.py
